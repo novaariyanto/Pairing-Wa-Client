@@ -143,10 +143,11 @@ session_start();
             </div>
 
             <!-- Messages Section -->
-            <div style="display:none" class="card messages-section">
+            <div  class="card messages-section">
                 <h2>Messages</h2>
                 <div class="tabs">
-                    <button class="tab-btn active" onclick="switchMessageTab('incoming')">Incoming</button>
+                    <button class="tab-btn active" onclick="switchMessageTab('all')">All</button>
+                    <button class="tab-btn" onclick="switchMessageTab('incoming')">Incoming</button>
                     <button class="tab-btn" onclick="switchMessageTab('outgoing')">Outgoing</button>
                 </div>
                 <div class="messages-container" id="messagesContainer">

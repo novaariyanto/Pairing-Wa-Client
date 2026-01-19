@@ -14,6 +14,11 @@ function apiRequest($method, $endpoint, $data = null) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $baseUrl . $endpoint);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    
+    // Disable SSL verification for testing purposes (often needed for local->public)
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . $apiKey,
         'Content-Type: application/json'
@@ -30,11 +35,38 @@ function apiRequest($method, $endpoint, $data = null) {
     
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    
+    // Check for cURL errors
+    if (curl_errno($ch)) {
+        $error_msg = curl_error($ch);
+        curl_close($ch);
+        return [
+            'code' => 0,
+            'data' => [
+                'error' => 'cURL Error: ' . $error_msg,
+                'details' => 'Failed to connect to ' . $baseUrl . $endpoint
+            ]
+        ];
+    }
+    
     curl_close($ch);
+    
+    $decoded = json_decode($response, true);
+    
+    // If JSON decode failed but we have a response, maybe it's an HTML error page or standard text
+    if ($decoded === null && !empty($response)) {
+        return [
+            'code' => $httpCode,
+            'data' => [
+                'error' => 'Invalid JSON Response',
+                'raw_response' => substr($response, 0, 500) // Limit length
+            ]
+        ];
+    }
     
     return [
         'code' => $httpCode,
-        'data' => json_decode($response, true)
+        'data' => $decoded
     ];
 }
 
@@ -54,7 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'success' => true, 
                 'data' => [
                     'api_key' => $apiKey,
-                    'base_url' => $baseUrl
+                    'base_url' => $baseUrl,
+                    'instance_key' => $_SESSION['instance_key'] ?? null
                 ]
             ]);
             exit;
@@ -139,9 +172,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
         case 'get_messages':
             $instanceKey = $_SESSION['instance_key'] ?? '';
-            $direction = $_POST['direction'] ?? 'IN';
+            $direction = $_POST['direction'] ?? 'all';
             
-            $result = apiRequest('GET', "/messages?instance_key={$instanceKey}&direction={$direction}");
+            $queryParams = [
+                'instance_key' => $instanceKey,
+                'limit' => 20 // Default limit as per requirement
+            ];
+
+            if ($direction !== 'all') {
+                $queryParams['direction'] = $direction;
+            }
+
+            $queryString = http_build_query($queryParams);
+            
+            $result = apiRequest('GET', "/messages?{$queryString}");
             echo json_encode(['success' => true, 'data' => $result['data']]);
             exit;
             

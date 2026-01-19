@@ -5,7 +5,7 @@
  */
 const state = {
     selectedInstanceKey: null,
-    currentMessageTab: 'incoming',
+    currentMessageTab: 'all',
     statusCheckInterval: null,
     qrRetryCount: 0,
     MAX_QR_RETRIES: 10
@@ -181,6 +181,14 @@ async function loadConfiguration() {
         if (res.success && res.data) {
             $('apiKey').value = res.data.api_key || '';
             $('baseUrl').value = res.data.base_url || '';
+
+            // Restore selected instance if exists
+            if (res.data.instance_key) {
+                state.selectedInstanceKey = res.data.instance_key;
+                // We'll let loadInstances handle the UI selection class
+                // But we can trigger a message refresh immediately
+                refreshMessages();
+            }
         }
     } catch (e) { console.error('Config load failed', e); }
 }
@@ -304,8 +312,16 @@ function switchTab(tab) {
 
 function switchMessageTab(tab) {
     state.currentMessageTab = tab;
-    $all('.messages-section .tab-btn').forEach(b => b.classList.toggle('active',
-        (tab === 'incoming' && b.innerText === 'Incoming') || (tab === 'outgoing' && b.innerText === 'Outgoing')));
+
+    // Update active class
+    const buttons = $all('.messages-section .tab-btn');
+    buttons.forEach(btn => {
+        const text = btn.innerText.toLowerCase();
+        // Check exact match for 'all', 'incoming', 'outgoing'
+        const isMatch = text === tab;
+        btn.classList.toggle('active', isMatch);
+    });
+
     refreshMessages();
 }
 
@@ -351,23 +367,33 @@ async function refreshMessages() {
     if (!state.selectedInstanceKey) return;
 
     try {
-        const direction = state.currentMessageTab === 'incoming' ? 'IN' : 'OUT';
+        let direction = 'all';
+        if (state.currentMessageTab === 'incoming') direction = 'IN';
+        if (state.currentMessageTab === 'outgoing') direction = 'OUT';
+
         const res = await apiCall('get_messages', { direction });
         const container = $('messagesContainer');
 
         if (res.success && res.data?.data?.length) {
             container.innerHTML = res.data.data.map(msg => {
-                const isOut = direction === 'OUT';
-                const from = msg.from || msg.to || 'Unknown';
-                const text = msg.payload?.text || msg.payload?.caption || 'Media message';
-                const time = new Date(msg.created_at || Date.now()).toLocaleString();
+                // Determine direction if mixed
+                const isOut = msg.key?.fromMe === true || msg.fromMe === true || (msg.to && !msg.from);
+
+                const from = msg.pushName || msg.from || msg.to || 'Unknown';
+                const text = msg.message?.conversation || msg.payload?.text || msg.message?.extendedTextMessage?.text || msg.payload?.caption || 'Media/System message';
+
+                let timestamp = msg.messageTimestamp || msg.created_at || Date.now();
+                // If timestamp is numeric (Unix timestamp in seconds), convert to ms
+                if (typeof timestamp === 'number' && timestamp < 1000000000000) {
+                    timestamp *= 1000;
+                }
+                const time = new Date(timestamp).toLocaleString();
 
                 return `
                     <div class="message-item ${isOut ? 'outgoing' : 'incoming'}">
                         <div class="message-from">${isOut ? 'To' : 'From'}: ${from}</div>
                         <div class="message-text">${text}</div>
                         <div class="message-time">${time}</div>
-                    </div>
                 `;
             }).join('');
         } else {
@@ -377,8 +403,8 @@ async function refreshMessages() {
 }
 
 // Init
-window.addEventListener('DOMContentLoaded', () => {
-    loadConfiguration();
+window.addEventListener('DOMContentLoaded', async () => {
+    await loadConfiguration();
     loadInstances();
     setInterval(refreshMessages, 10000);
 });
